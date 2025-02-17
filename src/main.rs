@@ -1,8 +1,5 @@
 use libc;
-use std::{
-    env, mem,
-    sync::{Arc, Mutex},
-};
+use std::{env, mem};
 use tokio::{signal, sync::mpsc};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
@@ -124,34 +121,32 @@ async fn read_packets(
     }
 }
 
-fn install_signal_handler(handles: Arc<Mutex<Vec<Pcap>>>) -> CancellationToken {
-    let ct = CancellationToken::new();
-    let clone = ct.clone();
+fn install_signal_handler(ct: CancellationToken, handles: Vec<Pcap>) {
+    let ct2 = ct.clone();
     tokio::spawn(async move {
         match signal::ctrl_c().await {
             Ok(()) => println!("Received SIGINT"),
             Err(e) => println!("Error listening for signal: {}", e),
         }
-        clone.cancel();
-        for handle in handles.lock().unwrap().iter() {
+        ct2.cancel();
+        for handle in handles {
             unsafe { pcap_breakloop(handle.handle) };
         }
     });
-    return ct;
 }
 
 #[tokio::main]
 async fn main() {
     init_pcap();
 
-    let handles: Arc<Mutex<Vec<Pcap>>> = Arc::new(Mutex::new(Vec::new()));
+    let mut handles: Vec<Pcap> = Vec::new();
     let (stats_tx, mut stats_rx) = mpsc::channel(env::args().len() - 1);
     let tracker = TaskTracker::new();
-    let ct = install_signal_handler(handles.clone());
+    let ct = CancellationToken::new();
 
     for iface in env::args().skip(1) {
         let h = open_live(&iface);
-        handles.lock().unwrap().push(h);
+        handles.push(h);
 
         let handle = h;
         let stats_tx = stats_tx.clone();
@@ -160,6 +155,8 @@ async fn main() {
             read_packets(ct, handle, &iface, stats_tx).await;
         });
     }
+
+    install_signal_handler(ct, handles);
 
     tracker.close();
     tracker.wait().await;
