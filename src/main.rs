@@ -145,10 +145,9 @@ async fn main() {
     let ct = CancellationToken::new();
 
     for iface in env::args().skip(1) {
-        let h = open_live(&iface);
-        handles.push(h);
+        let handle = open_live(&iface);
+        handles.push(handle);
 
-        let handle = h;
         let stats_tx = stats_tx.clone();
         let ct = ct.clone();
         tracker.spawn(async move {
